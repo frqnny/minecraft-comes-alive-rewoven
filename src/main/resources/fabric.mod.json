@@ -1,34 +1,32 @@
 {
   "schemaVersion": 1,
-  "id": "modid",
-  "version": "0.1.0",
-
-  "name": "Example Mod",
-  "description": "This is an example description! Tell everyone what your mod is about!",
+  "id": "mca",
+  "version": "0.1.0+mc.1.16.2",
+  "name": "Minecraft Comes Alive: Rewoven",
+  "description": "No more ugly nosed villagers! The original mod, ported to Minecraft Fabric 1.16 and above! \n This rewoven version of MCA offers: \n Villagers updated to work like 1.14 Village and Pillage changes! \n Several improvements in stability and features \n Merges MCA 5 and MCA 6 features into one mod, full of nostalgia AND innovation! \n\n Enjoy this mod, and give a thanks to WildBama for letting me port MCA to fabric! ",
   "authors": [
-    "franiscoder"
+    "ffrann"
   ],
   "contact": {
     "homepage": "https://fabricmc.net/",
     "sources": "https://github.com/FabricMC/fabric-example-mod"
   },
-
-  "license": "LGPL-3.0",
-  "icon": "assets/modid/icon.png",
-
+  "license": "GPL-3.0",
+  "icon": "assets/mca/icon.png",
   "environment": "*",
   "entrypoints": {
     "main": [
-      "io.github.franiscoder.ExampleMod"
+      "io.github.franiscoder.mca.MinecraftComesAlive"
+    ],
+    "client": [
+      "io.github.franiscoder.mca.MinecraftComesAliveClient"
     ]
   },
-
   "depends": {
-    "fabricloader": ">=0.7.4",
-    "fabric": "*",
-    "minecraft": "1.15.x"
+    "fabricloader": ">=0.9.0",
+    "minecraft": "1.16.x"
   },
-  "suggests": {
-    "flamingo": "*"
-  }
+  "mixins": [
+    "mca.mixins.json"
+  ]
 }

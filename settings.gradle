@@ -5,6 +5,15 @@ pluginManagement {
             name = 'Fabric'
             url = 'https://maven.fabricmc.net/'
         }
+        maven {
+            name = "Jitpack"
+            url = "https://jitpack.io"
+        }
+        maven {
+            name = "Ladysnake Libs"
+            url = 'https://dl.bintray.com/ladysnake/libs'
+        }
         gradlePluginPortal()
     }
+
 }
