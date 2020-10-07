@@ -9,10 +9,10 @@ import java.util.function.Supplier;
 
 @Mixin(SensorType.class)
 public interface MixinSensorType {
-    @Invoker
-    static <U extends Sensor<?>> SensorType<U> invokeRegister(String id, Supplier<U> supplier) {
-        throw new IllegalStateException();
-    }
+	@Invoker
+	static <U extends Sensor<?>> SensorType<U> invokeRegister(String id, Supplier<U> supplier) {
+		throw new IllegalStateException();
+	}
 }
 
 

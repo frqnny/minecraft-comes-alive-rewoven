@@ -14,42 +14,42 @@ import net.minecraft.util.math.Vec3d;
 import net.minecraft.world.poi.PointOfInterestStorage;
 
 public class GoToPointOfInterestTask extends Task<MCAVillagerEntity> {
-    private final float speed;
-    private final int completionRange;
-
-    public GoToPointOfInterestTask(float speed, int completionRange) {
-        super(ImmutableMap.of(MemoryModuleType.WALK_TARGET, MemoryModuleState.VALUE_ABSENT));
-        this.speed = speed;
-        this.completionRange = completionRange;
-    }
-
-    protected boolean shouldRun(ServerWorld serverWorld, MCAVillagerEntity villagerEntity) {
-        return !serverWorld.isNearOccupiedPointOfInterest(villagerEntity.getBlockPos());
-    }
-
-    protected void run(ServerWorld serverWorld, MCAVillagerEntity villagerEntity, long l) {
-        PointOfInterestStorage pointOfInterestStorage = serverWorld.getPointOfInterestStorage();
-        int i = pointOfInterestStorage.getDistanceFromNearestOccupied(ChunkSectionPos.from(villagerEntity.getBlockPos()));
-        Vec3d vec3d = null;
-
-        for (int j = 0; j < 5; ++j) {
-            Vec3d vec3d2 = TargetFinder.findGroundTarget(villagerEntity, 15, 7, (blockPos) -> (double) (-serverWorld.getOccupiedPointOfInterestDistance(ChunkSectionPos.from(blockPos))));
-            if (vec3d2 != null) {
-                int k = pointOfInterestStorage.getDistanceFromNearestOccupied(ChunkSectionPos.from(new BlockPos(vec3d2)));
-                if (k < i) {
-                    vec3d = vec3d2;
-                    break;
-                }
-
-                if (k == i) {
-                    vec3d = vec3d2;
-                }
-            }
-        }
-
-        if (vec3d != null) {
-            villagerEntity.getBrain().remember(MemoryModuleType.WALK_TARGET, new WalkTarget(vec3d, this.speed, this.completionRange));
-        }
-
-    }
+	private final float speed;
+	private final int completionRange;
+	
+	public GoToPointOfInterestTask(float speed, int completionRange) {
+		super(ImmutableMap.of(MemoryModuleType.WALK_TARGET, MemoryModuleState.VALUE_ABSENT));
+		this.speed = speed;
+		this.completionRange = completionRange;
+	}
+	
+	protected boolean shouldRun(ServerWorld serverWorld, MCAVillagerEntity villagerEntity) {
+		return !serverWorld.isNearOccupiedPointOfInterest(villagerEntity.getBlockPos());
+	}
+	
+	protected void run(ServerWorld serverWorld, MCAVillagerEntity villagerEntity, long l) {
+		PointOfInterestStorage pointOfInterestStorage = serverWorld.getPointOfInterestStorage();
+		int i = pointOfInterestStorage.getDistanceFromNearestOccupied(ChunkSectionPos.from(villagerEntity.getBlockPos()));
+		Vec3d vec3d = null;
+		
+		for (int j = 0; j < 5; ++j) {
+			Vec3d vec3d2 = TargetFinder.findGroundTarget(villagerEntity, 15, 7, (blockPos) -> (double) (-serverWorld.getOccupiedPointOfInterestDistance(ChunkSectionPos.from(blockPos))));
+			if (vec3d2 != null) {
+				int k = pointOfInterestStorage.getDistanceFromNearestOccupied(ChunkSectionPos.from(new BlockPos(vec3d2)));
+				if (k < i) {
+					vec3d = vec3d2;
+					break;
+				}
+				
+				if (k == i) {
+					vec3d = vec3d2;
+				}
+			}
+		}
+		
+		if (vec3d != null) {
+			villagerEntity.getBrain().remember(MemoryModuleType.WALK_TARGET, new WalkTarget(vec3d, this.speed, this.completionRange));
+		}
+		
+	}
 }

@@ -9,13 +9,13 @@ import net.minecraft.entity.ai.brain.sensor.SensorType;
 import net.minecraft.util.dynamic.GlobalPos;
 
 public class MCAEntityAIs {
-    public static MemoryModuleType<GlobalPos> test;
-    public static SensorType<SecondaryPOIS> SECONDARY_POIS;
-
-
-    public static void init() {
-        test = MixinMemoryModuleType.invokeRegister("mca:test");
-        SECONDARY_POIS = MixinSensorType.invokeRegister(MinecraftComesAlive.MODID + "secondary_pois", SecondaryPOIS::new);
-
-    }
+	public static MemoryModuleType<GlobalPos> test;
+	public static SensorType<SecondaryPOIS> SECONDARY_POIS;
+	
+	
+	public static void init() {
+		test = MixinMemoryModuleType.invokeRegister("mca:test");
+		SECONDARY_POIS = MixinSensorType.invokeRegister(MinecraftComesAlive.MODID + "secondary_pois", SecondaryPOIS::new);
+		
+	}
 }
