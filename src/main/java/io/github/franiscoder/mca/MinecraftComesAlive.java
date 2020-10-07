@@ -15,7 +15,6 @@ public class MinecraftComesAlive implements ModInitializer {
 	public void onInitialize() {
 		MCAItems.init();
 		MCACommands.init();
-		MCAComponents.init();
 		MCAEvents.init();
 		MCAVillagerProfessions.init();
 		MCAEntities.init();

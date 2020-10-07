@@ -6,6 +6,8 @@ import io.github.franiscoder.mca.init.MCAComponents;
 import io.github.franiscoder.mca.util.enums.SpouseType;
 import nerdhub.cardinal.components.api.ComponentType;
 import nerdhub.cardinal.components.api.util.sync.EntitySyncedComponent;
+import net.fabricmc.api.EnvType;
+import net.fabricmc.api.Environment;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.nbt.CompoundTag;
@@ -13,16 +15,18 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NbtHelper;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.network.ServerPlayerEntity;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.UUID;
 
+@Environment(EnvType.SERVER)
 public class PlayerDataComponent implements IPlayerDataComponent, EntitySyncedComponent {
 	public final ServerPlayerEntity playerEntity;
 	private final PlayerData playerData = new PlayerData();
 	
-	
 	public PlayerDataComponent(PlayerEntity entity) {
-		this.playerEntity = (ServerPlayerEntity) entity;
+		assert entity.getServer() != null;
+		this.playerEntity = entity.getServer().getPlayerManager().getPlayer(entity.getUuid());
 	}
 	
 	@Override
@@ -60,7 +64,7 @@ public class PlayerDataComponent implements IPlayerDataComponent, EntitySyncedCo
 	}
 	
 	@Override
-	public CompoundTag toTag(CompoundTag compoundTag) {
+	public @NotNull CompoundTag toTag(CompoundTag compoundTag) {
 		compoundTag.putBoolean("isMarried", playerData.isMarried);
 		if (playerData.isMarried) {
 			if (playerData.spouseType == SpouseType.PLAYER) {
@@ -92,12 +96,12 @@ public class PlayerDataComponent implements IPlayerDataComponent, EntitySyncedCo
 	}
 	
 	@Override
-	public Entity getEntity() {
+	public @NotNull Entity getEntity() {
 		return this.playerEntity;
 	}
 	
 	@Override
-	public ComponentType<?> getComponentType() {
+	public @NotNull ComponentType<?> getComponentType() {
 		return MCAComponents.PLAYER_DATA_COMPONENT;
 	}
 }
