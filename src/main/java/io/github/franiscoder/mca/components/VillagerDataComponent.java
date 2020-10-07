@@ -11,6 +11,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.registry.Registry;
+import org.jetbrains.annotations.NotNull;
 
 public class VillagerDataComponent implements IVillagerDataComponent, EntitySyncedComponent {
 	public final MCAVillagerEntity villager;
@@ -26,7 +27,7 @@ public class VillagerDataComponent implements IVillagerDataComponent, EntitySync
 	}
 	
 	@Override
-	public Entity getEntity() {
+	public @NotNull Entity getEntity() {
 		return villager;
 	}
 	
@@ -69,7 +70,7 @@ public class VillagerDataComponent implements IVillagerDataComponent, EntitySync
 	}
 	
 	@Override
-	public CompoundTag toTag(CompoundTag compoundTag) {
+	public @NotNull CompoundTag toTag(CompoundTag compoundTag) {
 		compoundTag.putByte("ParentType", villagerData.getParentType().getId());
 		switch (villagerData.getParentType()) {
 			case VILLAGER:
