@@ -18,7 +18,7 @@ public enum ParentType {
 				return type;
 			}
 		}
-		throw (new ArrayIndexOutOfBoundsException("Tried getting a non existant ParentType from byte id: " + id + "!"));
+		throw (new ArrayIndexOutOfBoundsException("Tried getting a non-existent ParentType from byte id: " + id + "!"));
 	}
 	
 	public byte getId() {

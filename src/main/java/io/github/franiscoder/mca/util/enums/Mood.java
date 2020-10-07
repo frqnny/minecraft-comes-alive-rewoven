@@ -1,7 +1,5 @@
 package io.github.franiscoder.mca.util.enums;
 
-import lombok.Getter;
-
 public enum Mood {
 	DEPRESSED(-3, Mentality.STANDARD, (byte) 0),
 	SAD(-2, Mentality.STANDARD, (byte) 1),
@@ -25,11 +23,8 @@ public enum Mood {
 	TALKATIVE(2, Mentality.SERIOUS, (byte) 17),
 	PLEASED(3, Mentality.SERIOUS, (byte) 18);
 	
-	@Getter
 	private final int level;
-	@Getter
 	private final Mentality mentality;
-	@Getter
 	private final byte id;
 	
 	Mood(int level, Mentality moodGroup, byte id) {
@@ -47,4 +42,7 @@ public enum Mood {
 		throw (new ArrayIndexOutOfBoundsException("Tried getting a non existant Mood from byte id: " + id + "!"));
 	}
 	
+	public byte getId() {
+		return this.id;
+	}
 }

@@ -13,7 +13,6 @@ import io.github.franiscoder.mca.util.enums.Mentality;
 import io.github.franiscoder.mca.util.enums.Personality;
 import io.github.franiscoder.mca.util.villager.VillagerHelper;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
-import lombok.Getter;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.block.BlockState;
@@ -83,16 +82,11 @@ public class MCAVillagerEntity extends MerchantEntity implements InteractionObse
 	private int restocksToday;
 	private long lastRestockCheckTime;
 	private boolean natural;
-	private @Getter
-	String villagerName;
-	private @Getter
-	String texture;
-	private @Getter
-	Gender gender;
-	private @Getter
-	Mentality mentality;
-	private @Getter
-	Personality personality;
+	private String villagerName;
+	private String texture;
+	private Gender gender;
+	private Mentality mentality;
+	private Personality personality;
 	//TODO lots of cached variables so i don't have to dig through VillagerData
 	
 	public MCAVillagerEntity(EntityType<? extends MCAVillagerEntity> entityType, World world) {
@@ -109,8 +103,9 @@ public class MCAVillagerEntity extends MerchantEntity implements InteractionObse
 	
 	
 	@Override
+	@SuppressWarnings("unchecked")
 	public Brain<MCAVillagerEntity> getBrain() {
-		return (Brain<MCAVillagerEntity>) super.getBrain();
+		return (Brain<MCAVillagerEntity>) this.brain;
 	}
 	
 	@Override
@@ -406,7 +401,7 @@ public class MCAVillagerEntity extends MerchantEntity implements InteractionObse
 		super.readCustomDataFromTag(tag);
 		
 		if (tag.contains("Offers", 10)) {
-			this.offers = new TraderOfferList(tag.getCompound("Offers"));
+			this.offers = new TradeOfferList(tag.getCompound("Offers"));
 		}
 		
 		if (tag.contains("FoodLevel", 1)) {
@@ -572,7 +567,7 @@ public class MCAVillagerEntity extends MerchantEntity implements InteractionObse
 		this.depleteFood(12);
 	}
 	
-	public void setOffers(TraderOfferList offers) {
+	public void setOffers(TradeOfferList offers) {
 		this.offers = offers;
 	}
 	
@@ -700,10 +695,10 @@ public class MCAVillagerEntity extends MerchantEntity implements InteractionObse
 		MCAVillagerData villagerData = this.getVillagerData();
 		Int2ObjectMap<TradeOffers.Factory[]> int2ObjectMap = TradeOffers.PROFESSION_TO_LEVELED_TRADE.get(villagerData.getProfession());
 		if (int2ObjectMap != null && !int2ObjectMap.isEmpty()) {
-			TradeOffers.Factory[] factorys = int2ObjectMap.get(villagerData.getLevel());
-			if (factorys != null) {
-				TraderOfferList traderOfferList = this.getOffers();
-				this.fillRecipesFromPool(traderOfferList, factorys, 2);
+			TradeOffers.Factory[] factories = int2ObjectMap.get(villagerData.getLevel());
+			if (factories != null) {
+				TradeOfferList tradeOfferList = this.getOffers();
+				this.fillRecipesFromPool(tradeOfferList, factories, 2);
 			}
 		}
 	}
@@ -856,5 +851,9 @@ public class MCAVillagerEntity extends MerchantEntity implements InteractionObse
 	@Override
 	public Text getName() {
 		return new LiteralText(villagerName);
+	}
+	
+	public String getTexture() {
+		return texture;
 	}
 }

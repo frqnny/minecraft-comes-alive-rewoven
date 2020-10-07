@@ -1,7 +1,5 @@
 package io.github.franiscoder.mca.util.enums;
 
-import lombok.Getter;
-
 public enum Chore {
 	Farming((byte) 0),
 	TreeCutting((byte) 1),
@@ -9,7 +7,6 @@ public enum Chore {
 	Fishing((byte) 3),
 	None((byte) 4);
 	
-	@Getter
 	public final byte id;
 	
 	Chore(byte id) {
@@ -23,5 +20,9 @@ public enum Chore {
 			}
 		}
 		throw (new ArrayIndexOutOfBoundsException("Tried getting a non existant Chore from byte id: " + id + "!"));
+	}
+	
+	public byte getId() {
+		return this.id;
 	}
 }

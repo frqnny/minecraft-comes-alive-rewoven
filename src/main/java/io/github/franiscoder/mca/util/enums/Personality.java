@@ -1,7 +1,5 @@
 package io.github.franiscoder.mca.util.enums;
 
-import lombok.Getter;
-
 public enum Personality {
 	ATHLETIC(Mentality.PLAYFUL, (byte) 0),
 	CONFIDENT(Mentality.SERIOUS, (byte) 1),
@@ -16,10 +14,7 @@ public enum Personality {
 	STUBBORN(Mentality.SERIOUS, (byte) 10),
 	Odd(Mentality.PLAYFUL, (byte) 11);
 	
-	
-	@Getter
 	public final Mentality group;
-	@Getter
 	public final byte id;
 	
 	Personality(Mentality group, byte id) {
@@ -34,5 +29,13 @@ public enum Personality {
 			}
 		}
 		throw (new ArrayIndexOutOfBoundsException("Tried getting a non existant Personality from byte id: " + id + "!"));
+	}
+	
+	public Mentality getGroup() {
+		return group;
+	}
+	
+	public byte getId() {
+		return id;
 	}
 }

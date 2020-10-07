@@ -1,15 +1,12 @@
 package io.github.franiscoder.mca.util.enums;
 
-import lombok.Getter;
-
 public enum Age {
 	Baby((byte) 0),
-	Todler((byte) 1),
+	Toddler((byte) 1),
 	Kid((byte) 2),
 	Teenager((byte) 3),
 	Adult((byte) 4);
 	
-	@Getter
 	final byte id;
 	
 	Age(byte id) {
@@ -23,5 +20,9 @@ public enum Age {
 			}
 		}
 		throw (new ArrayIndexOutOfBoundsException("Tried getting a non existant Age from byte id: " + id + "!"));
+	}
+	
+	public byte getId() {
+		return this.id;
 	}
 }
