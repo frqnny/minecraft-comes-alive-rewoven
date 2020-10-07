@@ -98,9 +98,9 @@ public class MCAVillagerEntity extends MerchantEntity implements InteractionObse
 	}
 	
 	public static DefaultAttributeContainer.Builder createVillagerAttributes() {
-		return MobEntity.createMobAttributes().add(EntityAttributes.GENERIC_MOVEMENT_SPEED, 0.5D).add(EntityAttributes.GENERIC_FOLLOW_RANGE, 48.0D);
+		return MobEntity.createMobAttributes().add(EntityAttributes.GENERIC_MOVEMENT_SPEED, 0.5D)
+				.add(EntityAttributes.GENERIC_FOLLOW_RANGE, 48.0D);
 	}
-	
 	
 	@Override
 	@SuppressWarnings("unchecked")

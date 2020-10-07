@@ -1,7 +1,7 @@
 package io.github.franiscoder.mca.init;
 
 public enum MCAVillagerProfessions {
-	miner, baker;
+	MINER, BAKER;
 	
 	public static void init() { /*NO-OP*/ }
 }

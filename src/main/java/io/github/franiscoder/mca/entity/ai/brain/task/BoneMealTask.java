@@ -96,28 +96,29 @@ public class BoneMealTask extends Task<MCAVillagerEntity> {
 	}
 	
 	protected void keepRunning(ServerWorld serverWorld, MCAVillagerEntity villagerEntity, long l) {
-		BlockPos blockPos = this.pos.get();
-		if (l >= this.startTime && blockPos.isWithinDistance(villagerEntity.getPos(), 1.0D)) {
-			ItemStack itemStack = ItemStack.EMPTY;
-			SimpleInventory simpleInventory = villagerEntity.getInventory();
-			int i = simpleInventory.size();
-			
-			for (int j = 0; j < i; ++j) {
-				ItemStack itemStack2 = simpleInventory.getStack(j);
-				if (itemStack2.getItem() == Items.BONE_MEAL) {
-					itemStack = itemStack2;
-					break;
+		if (this.pos.isPresent()) { // this check may be in the wrong place
+			BlockPos blockPos = this.pos.get();
+			if (l >= this.startTime && blockPos.isWithinDistance(villagerEntity.getPos(), 1.0D)) {
+				ItemStack itemStack = ItemStack.EMPTY;
+				SimpleInventory simpleInventory = villagerEntity.getInventory();
+				int i = simpleInventory.size();
+				
+				for (int j = 0; j < i; ++j) {
+					ItemStack itemStack2 = simpleInventory.getStack(j);
+					if (itemStack2.getItem() == Items.BONE_MEAL) {
+						itemStack = itemStack2;
+						break;
+					}
 				}
+				
+				if (!itemStack.isEmpty() && BoneMealItem.useOnFertilizable(itemStack, serverWorld, blockPos)) {
+					serverWorld.syncWorldEvent(2005, blockPos, 0);
+					this.pos = this.findBoneMealPos(serverWorld, villagerEntity);
+					this.addLookWalkTargets(villagerEntity);
+					this.startTime = l + 40L;
+				}
+				++this.duration;
 			}
-			
-			if (!itemStack.isEmpty() && BoneMealItem.useOnFertilizable(itemStack, serverWorld, blockPos)) {
-				serverWorld.syncWorldEvent(2005, blockPos, 0);
-				this.pos = this.findBoneMealPos(serverWorld, villagerEntity);
-				this.addLookWalkTargets(villagerEntity);
-				this.startTime = l + 40L;
-			}
-			
-			++this.duration;
 		}
 	}
 }
