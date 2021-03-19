@@ -8,6 +8,6 @@ import org.spongepowered.asm.mixin.gen.Invoker;
 
 @Mixin(Task.class)
 public interface MixinTask {
-    @Invoker
-    <E extends LivingEntity> boolean invokeShouldKeepRunning(ServerWorld world, E entity, long time);
+	@Invoker
+	<E extends LivingEntity> boolean invokeShouldKeepRunning(ServerWorld world, E entity, long time);
 }

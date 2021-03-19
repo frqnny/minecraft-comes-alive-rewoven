@@ -1,15 +1,16 @@
 {
-  "required": true,
-  "package": "io.github.franiscoder.mca.mixin",
-  "compatibilityLevel": "JAVA_8",
-  "mixins": [
-    "MixinSensorType",
-    "MixinMemoryModuleType",
-    "MixinTask"
-  ],
-  "client": [
-  ],
-  "injectors": {
-    "defaultRequire": 1
-  }
+	"required": true,
+	"package": "io.github.franiscoder.mca.mixin",
+	"compatibilityLevel": "JAVA_8",
+	"mixins": [
+		"EntityTypeMixin",
+		"MixinMemoryModuleType",
+		"MixinSensorType",
+		"MixinTask"
+	],
+	"client": [
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
 }

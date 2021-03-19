@@ -13,7 +13,6 @@ import io.github.franiscoder.mca.util.enums.Mentality;
 import io.github.franiscoder.mca.util.enums.Personality;
 import io.github.franiscoder.mca.util.villager.VillagerHelper;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
-import lombok.Getter;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.minecraft.block.BlockState;
@@ -28,8 +27,8 @@ import net.minecraft.entity.effect.StatusEffectInstance;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.entity.mob.MobEntity;
 import net.minecraft.entity.mob.WitchEntity;
-import net.minecraft.entity.passive.AbstractTraderEntity;
 import net.minecraft.entity.passive.IronGolemEntity;
+import net.minecraft.entity.passive.MerchantEntity;
 import net.minecraft.entity.passive.PassiveEntity;
 import net.minecraft.entity.passive.VillagerEntity;
 import net.minecraft.entity.player.PlayerEntity;
@@ -70,787 +69,791 @@ import java.util.Optional;
 import java.util.function.BiPredicate;
 import java.util.stream.Collectors;
 
-@SuppressWarnings({"unused", "unchecked", "inline"})
-public class MCAVillagerEntity extends AbstractTraderEntity implements InteractionObserver {
-    private final MCAVillagerGossips gossip;
-    private int levelUpTimer;
-    private boolean levelingUp;
-    private PlayerEntity lastCustomer;
-    private byte foodLevel;
-    private long gossipStartTime;
-    private long lastGossipDecayTime;
-    private int experience;
-    private long lastRestockTime;
-    private int restocksToday;
-    private long lastRestockCheckTime;
-    private boolean natural;
-    private @Getter String villagerName;
-    private @Getter String texture;
-    private @Getter Gender gender;
-    private @Getter Mentality mentality;
-    private @Getter Personality personality;
-    //TODO lots of cached variables so i don't have to dig through VillagerData
-
-    public MCAVillagerEntity(EntityType<? extends MCAVillagerEntity> entityType, World world) {
-        super(entityType, world);
-        this.gossip = new MCAVillagerGossips();
-        ((MobNavigation) this.getNavigation()).setCanPathThroughDoors(true);
-        this.getNavigation().setCanSwim(true);
-        this.setCanPickUpLoot(true);
-    }
-
-    public static DefaultAttributeContainer.Builder createVillagerAttributes() {
-        return MobEntity.createMobAttributes().add(EntityAttributes.GENERIC_MOVEMENT_SPEED, 0.5D).add(EntityAttributes.GENERIC_FOLLOW_RANGE, 48.0D);
-    }
-
-
-    @Override
-    public Brain<MCAVillagerEntity> getBrain() {
-        return (Brain<MCAVillagerEntity>) super.getBrain();
-    }
-
-    @Override
-    protected Brain.Profile<MCAVillagerEntity> createBrainProfile() {
-        return Brain.createProfile(VillagerHelper.MEMORY_MODULES, VillagerHelper.SENSORS);
-    }
-
-    @Override
-    protected Brain<?> deserializeBrain(Dynamic<?> dynamic) {
-        Brain<MCAVillagerEntity> brain = this.createBrainProfile().deserialize(dynamic);
-        this.initBrain(brain);
-        return brain;
-    }
-
-    public void reinitializeBrain(ServerWorld world) {
-        Brain<MCAVillagerEntity> brain = this.getBrain();
-        brain.stopAllTasks(world, this);
-        this.brain = brain.copy();
-        this.initBrain(this.getBrain());
-    }
-
-    //TODO add
-    private void initBrain(Brain<MCAVillagerEntity> brain) {
-        VillagerProfession villagerProfession = this.getVillagerData().getProfession();
-        if (this.isBaby()) {
-            brain.setSchedule(Schedule.VILLAGER_BABY);
-            brain.setTaskList(Activity.PLAY, MCAVillagerTaskListProvider.createPlayTasks(0.5F));
-        } else {
-            brain.setSchedule(Schedule.VILLAGER_DEFAULT);
-            brain.setTaskList(Activity.WORK, MCAVillagerTaskListProvider.createWorkTasks(villagerProfession, 0.5F), ImmutableSet.of(Pair.of(MemoryModuleType.JOB_SITE, MemoryModuleState.VALUE_PRESENT)));
-        }
-
-        brain.setTaskList(Activity.CORE, MCAVillagerTaskListProvider.createCoreTasks(villagerProfession, 0.5F));
-        brain.setTaskList(Activity.MEET, MCAVillagerTaskListProvider.createMeetTasks(villagerProfession, 0.5F), ImmutableSet.of(Pair.of(MemoryModuleType.MEETING_POINT, MemoryModuleState.VALUE_PRESENT)));
-        brain.setTaskList(Activity.REST, MCAVillagerTaskListProvider.createRestTasks(villagerProfession, 0.5F));
-        brain.setTaskList(Activity.IDLE, MCAVillagerTaskListProvider.createIdleTasks(villagerProfession, 0.5F));
-        brain.setTaskList(Activity.PANIC, MCAVillagerTaskListProvider.createPanicTasks(villagerProfession, 0.5F));
-        brain.setTaskList(Activity.PRE_RAID, MCAVillagerTaskListProvider.createPreRaidTasks(villagerProfession, 0.5F));
-        brain.setTaskList(Activity.RAID, MCAVillagerTaskListProvider.createRaidTasks(villagerProfession, 0.5F));
-        brain.setTaskList(Activity.HIDE, MCAVillagerTaskListProvider.createHideTasks(villagerProfession, 0.5F));
-        brain.setCoreActivities(ImmutableSet.of(Activity.CORE));
-        brain.setDefaultActivity(Activity.IDLE);
-        brain.doExclusively(Activity.IDLE);
-        brain.refreshActivities(this.world.getTimeOfDay(), this.world.getTime());
-    }
-
-    @Override
-    protected void onGrowUp() {
-        super.onGrowUp();
-        if (this.world instanceof ServerWorld) {
-            this.reinitializeBrain((ServerWorld) this.world);
-        }
-
-    }
-
-    public boolean isNatural() {
-        return this.natural;
-    }
-
-    @Override
-    protected void mobTick() {
-        this.world.getProfiler().push("mcaVillagerBrain");
-        this.getBrain().tick((ServerWorld) this.world, this);
-        this.world.getProfiler().pop();
-        if (this.natural) {
-            this.natural = false;
-        }
-
-        if (!this.hasCustomer() && this.levelUpTimer > 0) {
-            --this.levelUpTimer;
-            if (this.levelUpTimer <= 0) {
-                if (this.levelingUp) {
-                    this.levelUp();
-                    this.levelingUp = false;
-                }
-
-                this.addStatusEffect(new StatusEffectInstance(StatusEffects.REGENERATION, 200, 0));
-            }
-        }
-
-        if (this.lastCustomer != null && this.world instanceof ServerWorld) {
-            ((ServerWorld) this.world).handleInteraction(EntityInteraction.TRADE, this.lastCustomer, this);
-            this.world.sendEntityStatus(this, (byte) 14);
-            this.lastCustomer = null;
-        }
-
-        if (!this.isAiDisabled() && this.random.nextInt(100) == 0) {
-            Raid raid = ((ServerWorld) this.world).getRaidAt(this.getBlockPos());
-            if (raid != null && raid.isActive() && !raid.isFinished()) {
-                this.world.sendEntityStatus(this, (byte) 42);
-            }
-        }
-
-        if (this.getVillagerData().getProfession() == VillagerProfession.NONE && this.hasCustomer()) {
-            this.resetCustomer();
-        }
-
-        super.mobTick();
-    }
-
-    @Override
-    public void tick() {
-        super.tick();
-        if (this.getHeadRollingTimeLeft() > 0) {
-            this.setHeadRollingTimeLeft(this.getHeadRollingTimeLeft() - 1);
-        }
-
-        this.decayGossip();
-    }
-
-    //TODO open
-    @Override
-    public ActionResult interactMob(PlayerEntity player, Hand hand) {
-        ItemStack itemStack = player.getStackInHand(hand);
-        if (itemStack.getItem() != Items.VILLAGER_SPAWN_EGG && this.isAlive() && !this.hasCustomer() && !this.isSleeping()) {
-            if (this.isBaby()) {
-                this.sayNo();
-            } else {
-                boolean bl = this.getOffers().isEmpty();
-                if (hand == Hand.MAIN_HAND) {
-                    if (bl && !this.world.isClient) {
-                        this.sayNo();
-                    }
-
-                    player.incrementStat(Stats.TALKED_TO_VILLAGER);
-                }
-
-                if (!bl) {
-                    if (!this.world.isClient) {
-                        assert this.offers != null;
-                        if (!this.offers.isEmpty()) {
-                            this.beginTradeWith(player);
-                        }
-                    }
-
-                }
-            }
-            return ActionResult.success(this.world.isClient);
-        } else {
-            return super.interactMob(player, hand);
-        }
-    }
-
-    //TODO Cleanup Trader stuff
-    private void sayNo() {
-        this.setHeadRollingTimeLeft(40);
-    }
-
-    private void beginTradeWith(PlayerEntity customer) {
-        this.prepareRecipesFor(customer);
-        this.setCurrentCustomer(customer);
-        this.sendOffers(customer, this.getDisplayName(), this.getVillagerData().getLevel());
-    }
-
-    @Override
-    public void setCurrentCustomer(PlayerEntity customer) {
-        boolean bl = this.getCurrentCustomer() != null && customer == null;
-        super.setCurrentCustomer(customer);
-        if (bl) {
-            this.resetCustomer();
-        }
-
-    }
-
-    @Override
-    protected void resetCustomer() {
-        super.resetCustomer();
-        this.clearCurrentBonus();
-    }
-
-    private void clearCurrentBonus() {
-
-        for (TradeOffer tradeOffer : this.getOffers()) {
-            tradeOffer.clearSpecialPrice();
-        }
-
-    }
-
-    @Override
-    public boolean canRefreshTrades() {
-        return true;
-    }
-
-    public void restock() {
-        this.updatePricesOnDemand();
-
-        for (TradeOffer tradeOffer : this.getOffers()) {
-            tradeOffer.resetUses();
-        }
-
-        this.lastRestockTime = this.world.getTime();
-        ++this.restocksToday;
-    }
-
-    private boolean needRestock() {
-        for (TradeOffer offer : this.getOffers()) {
-            if (offer.method_21834()) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private boolean canRestock() {
-        return this.restocksToday == 0 || this.restocksToday < 2 && this.world.getTime() > this.lastRestockTime + 2400L;
-    }
-
-    public boolean shouldRestock() {
-        long l = this.lastRestockTime + 12000L;
-        long m = this.world.getTime();
-        boolean bl = m > l;
-        long n = this.world.getTimeOfDay();
-        if (this.lastRestockCheckTime > 0L) {
-            long o = this.lastRestockCheckTime / 24000L;
-            long p = n / 24000L;
-            bl |= p > o;
-        }
-
-        this.lastRestockCheckTime = n;
-        if (bl) {
-            this.lastRestockTime = m;
-            this.clearDailyRestockCount();
-        }
-
-        return this.canRestock() && this.needRestock();
-    }
-
-    private void resetAndUpdatePrices() {
-        int i = 2 - this.restocksToday;
-        if (i > 0) {
-
-            for (TradeOffer tradeOffer : this.getOffers()) {
-                tradeOffer.resetUses();
-            }
-        }
-
-        for (int j = 0; j < i; ++j) {
-            this.updatePricesOnDemand();
-        }
-
-    }
-
-    private void updatePricesOnDemand() {
-
-        for (TradeOffer tradeOffer : this.getOffers()) {
-            tradeOffer.updatePriceOnDemand();
-        }
-
-    }
-
-    private void prepareRecipesFor(PlayerEntity player) {
-        int i = this.getReputation(player);
-        if (i != 0) {
-
-            for (TradeOffer tradeOffer : this.getOffers()) {
-                tradeOffer.increaseSpecialPrice(-MathHelper.floor((float) i * tradeOffer.getPriceMultiplier()));
-            }
-        }
-
-        if (player.hasStatusEffect(StatusEffects.HERO_OF_THE_VILLAGE)) {
-            StatusEffectInstance statusEffectInstance = player.getStatusEffect(StatusEffects.HERO_OF_THE_VILLAGE);
-            assert statusEffectInstance != null;
-            int j = statusEffectInstance.getAmplifier();
-
-            for (TradeOffer tradeOffer2 : this.getOffers()) {
-                double d = 0.3D + 0.0625D * (double) j;
-                int k = (int) Math.floor(d * (double) tradeOffer2.getOriginalFirstBuyItem().getCount());
-                tradeOffer2.increaseSpecialPrice(-Math.max(k, 1));
-            }
-        }
-
-    }
-
-    //TODO Keep or move to VillagerData?
-    @Override
-    public void writeCustomDataToTag(CompoundTag tag) {
-        super.writeCustomDataToTag(tag);
-        tag.putByte("FoodLevel", this.foodLevel);
-        tag.put("Gossips", this.gossip.serialize(NbtOps.INSTANCE).getValue());
-        tag.putInt("Xp", this.experience);
-        tag.putLong("LastRestock", this.lastRestockTime);
-        tag.putLong("LastGossipDecay", this.lastGossipDecayTime);
-        tag.putInt("RestocksToday", this.restocksToday);
-        if (this.natural) {
-            tag.putBoolean("AssignProfessionWhenSpawned", true);
-        }
-
-    }
-
-    @Override
-    public void readCustomDataFromTag(CompoundTag tag) {
-        super.readCustomDataFromTag(tag);
-
-        if (tag.contains("Offers", 10)) {
-            this.offers = new TraderOfferList(tag.getCompound("Offers"));
-        }
-
-        if (tag.contains("FoodLevel", 1)) {
-            this.foodLevel = tag.getByte("FoodLevel");
-        }
-
-        ListTag listTag = tag.getList("Gossips", 10);
-        this.gossip.deserialize(new Dynamic<>(NbtOps.INSTANCE, listTag));
-        if (tag.contains("Xp", 3)) {
-            this.experience = tag.getInt("Xp");
-        }
-
-        this.lastRestockTime = tag.getLong("LastRestock");
-        this.lastGossipDecayTime = tag.getLong("LastGossipDecay");
-        this.setCanPickUpLoot(true);
-        if (this.world instanceof ServerWorld) {
-            this.reinitializeBrain((ServerWorld) this.world);
-        }
-
-        this.restocksToday = tag.getInt("RestocksToday");
-        if (tag.contains("AssignProfessionWhenSpawned")) {
-            this.natural = tag.getBoolean("AssignProfessionWhenSpawned");
-        }
-        this.cacheVillagerData();
-
-    }
-
-    public void cacheVillagerData() {
-        MCAVillagerData data = this.getVillagerData();
-        this.villagerName = data.getName();
-        this.texture = data.getTexture();
-        this.gender = data.getGender();
-        this.mentality = data.getMentality();
-        this.personality = data.getPersonality();
-    }
-
-    @Override
-    public boolean canImmediatelyDespawn(double distanceSquared) {
-        return false;
-    }
-
-    public MCAVillagerData getVillagerData() {
-        return MCAComponents.VILLAGE_DATE_COMPONENT.get(this).get();
-    }
-
-    //CLEANUP copied villager methods
-    @Override
-    protected void afterUsing(TradeOffer offer) {
-        int i = 3 + this.random.nextInt(4);
-        this.experience += offer.getTraderExperience();
-        this.lastCustomer = this.getCurrentCustomer();
-        if (this.canLevelUp()) {
-            this.levelUpTimer = 40;
-            this.levelingUp = true;
-            i += 5;
-        }
-
-        if (offer.shouldRewardPlayerExperience()) {
-            this.world.spawnEntity(new ExperienceOrbEntity(this.world, this.getX(), this.getY() + 0.5D, this.getZ(), i));
-        }
-
-    }
-
-    @Override
-    public void setAttacker(LivingEntity attacker) {
-        if (attacker != null && this.world instanceof ServerWorld) {
-            ((ServerWorld) this.world).handleInteraction(EntityInteraction.VILLAGER_HURT, attacker, this);
-            if (this.isAlive() && attacker instanceof PlayerEntity) {
-                this.world.sendEntityStatus(this, (byte) 13);
-            }
-        }
-
-        super.setAttacker(attacker);
-    }
-
-    @Override
-    public void onDeath(DamageSource source) {
-        LOGGER.info("Villager {} died, message: '{}'", this, source.getDeathMessage(this).getString());
-        Entity entity = source.getAttacker();
-        if (entity != null) {
-            this.notifyDeath(entity);
-        }
-
-        this.releaseTicketFor(MemoryModuleType.HOME);
-        this.releaseTicketFor(MemoryModuleType.JOB_SITE);
-        this.releaseTicketFor(MemoryModuleType.MEETING_POINT);
-        super.onDeath(source);
-    }
-
-    private void notifyDeath(Entity killer) {
-        if (this.world instanceof ServerWorld) {
-            Optional<List<LivingEntity>> optional = this.brain.getOptionalMemory(MemoryModuleType.VISIBLE_MOBS);
-            if (optional.isPresent()) {
-                ServerWorld serverWorld = (ServerWorld) this.world;
-                optional.get().stream().filter((livingEntity) -> livingEntity instanceof InteractionObserver).forEach((livingEntity) -> serverWorld.handleInteraction(EntityInteraction.VILLAGER_KILLED, killer, (InteractionObserver) livingEntity));
-            }
-        }
-    }
-
-    public void releaseTicketFor(MemoryModuleType<GlobalPos> memoryModuleType) {
-        if (this.world instanceof ServerWorld) {
-            MinecraftServer minecraftServer = ((ServerWorld) this.world).getServer();
-            this.brain.getOptionalMemory(memoryModuleType).ifPresent((globalPos) -> {
-                ServerWorld serverWorld = minecraftServer.getWorld(globalPos.getDimension());
-                if (serverWorld != null) {
-                    PointOfInterestStorage pointOfInterestStorage = serverWorld.getPointOfInterestStorage();
-                    Optional<PointOfInterestType> optional = pointOfInterestStorage.getType(globalPos.getPos());
-                    BiPredicate<MCAVillagerEntity, PointOfInterestType> biPredicate = VillagerHelper.POINTS_OF_INTEREST.get(memoryModuleType);
-                    if (optional.isPresent() && biPredicate.test(this, optional.get())) {
-                        pointOfInterestStorage.releaseTicket(globalPos.getPos());
-                        DebugInfoSender.sendPointOfInterest(serverWorld, globalPos.getPos());
-                    }
-
-                }
-            });
-        }
-    }
-
-    //TODO more breeding shit that needs to be removed
-    @Override
-    public boolean isReadyToBreed() {
-        return this.foodLevel + this.getAvailableFood() >= 12 && this.getBreedingAge() == 0;
-    }
-
-    private boolean lacksFood() {
-        return this.foodLevel < 12;
-    }
-
-    private void consumeAvailableFood() {
-        if (this.lacksFood() && this.getAvailableFood() != 0) {
-            int size = this.getInventory().size();
-            for (int i = 0; i < size; ++i) {
-                ItemStack itemStack = this.getInventory().getStack(i);
-                if (!itemStack.isEmpty()) {
-                    Integer integer = VillagerHelper.ITEM_FOOD_VALUES.get(itemStack.getItem());
-                    if (integer != null) {
-                        int j = itemStack.getCount();
-
-                        for (int k = j; k > 0; --k) {
-                            this.foodLevel = (byte) (this.foodLevel + integer);
-                            this.getInventory().removeStack(i, 1);
-                            if (!this.lacksFood()) {
-                                return;
-                            }
-                        }
-                    }
-                }
-            }
-
-        }
-    }
-
-    public int getReputation(PlayerEntity player) {
-        return this.gossip.getReputationFor(player.getUuid(), (villageGossipType) -> true);
-    }
-
-    private void depleteFood(int amount) {
-        this.foodLevel = (byte) (this.foodLevel - amount);
-    }
-
-    public void eatForBreeding() {
-        this.consumeAvailableFood();
-        this.depleteFood(12);
-    }
-
-    public void setOffers(TraderOfferList offers) {
-        this.offers = offers;
-    }
-
-    private boolean canLevelUp() {
-        int i = this.getVillagerData().getLevel();
-        return VillagerData.canLevelUp(i) && this.experience >= VillagerData.getUpperLevelExperience(i);
-    }
-
-    private void levelUp() {
-        this.getVillagerData().setLevel(getVillagerData().getLevel() + 1);
-        this.fillRecipes();
-    }
-
-    protected Text getDefaultName() {
-        return new TranslatableText(this.getType().getTranslationKey() + '.' + Registry.VILLAGER_PROFESSION.getId(this.getVillagerData().getProfession()).getPath());
-    }
-
-    @Override
-    @Environment(EnvType.CLIENT)
-    public void handleStatus(byte status) {
-        if (status == 12) {
-            this.produceParticles(ParticleTypes.HEART);
-        } else if (status == 13) {
-            this.produceParticles(ParticleTypes.ANGRY_VILLAGER);
-        } else if (status == 14) {
-            this.produceParticles(ParticleTypes.HAPPY_VILLAGER);
-        } else if (status == 42) {
-            this.produceParticles(ParticleTypes.SPLASH);
-        } else {
-            super.handleStatus(status);
-        }
-
-    }
-
-    @Override
-    public EntityData initialize(ServerWorldAccess arg, LocalDifficulty difficulty, SpawnReason spawnReason, EntityData entityData, CompoundTag entityTag) {
-        if (spawnReason == SpawnReason.BREEDING) {
-            this.getVillagerData().setProfession(VillagerProfession.NONE);
-        }
-
-        if (spawnReason == SpawnReason.STRUCTURE) {
-            this.natural = true;
-        }
-
-        return super.initialize(arg, difficulty, spawnReason, entityData, entityTag);
-    }
-
-    @Override
-    public MCAVillagerEntity createChild(ServerWorld serverWorld, PassiveEntity passiveEntity) {
-        MCAVillagerEntity villagerEntity = new MCAVillagerEntity(MCAEntities.MCA_VILLAGER, serverWorld);
-        villagerEntity.initialize(serverWorld, serverWorld.getLocalDifficulty(villagerEntity.getBlockPos()), SpawnReason.BREEDING, null, null);
-        return villagerEntity;
-    }
-
-    @Override
-    public void onStruckByLightning(ServerWorld serverWorld, LightningEntity lightningEntity) {
-        if (serverWorld.getDifficulty() != Difficulty.PEACEFUL) {
-            LOGGER.info("Villager {} was struck by lightning {}.", this, lightningEntity);
-            WitchEntity witchEntity = EntityType.WITCH.create(serverWorld);
-            assert witchEntity != null;
-            witchEntity.refreshPositionAndAngles(this.getX(), this.getY(), this.getZ(), this.yaw, this.pitch);
-            witchEntity.initialize(serverWorld, serverWorld.getLocalDifficulty(witchEntity.getBlockPos()), SpawnReason.CONVERSION, null, null);
-            witchEntity.setAiDisabled(this.isAiDisabled());
-            if (this.hasCustomName()) {
-                witchEntity.setCustomName(this.getCustomName());
-                witchEntity.setCustomNameVisible(this.isCustomNameVisible());
-            }
-
-            witchEntity.setPersistent();
-            serverWorld.spawnEntityAndPassengers(witchEntity);
-            this.remove();
-        } else {
-            super.onStruckByLightning(serverWorld, lightningEntity);
-        }
-
-    }
-
-    @Override
-    protected void loot(ItemEntity item) {
-        ItemStack itemStack = item.getStack();
-        if (this.canGather(itemStack)) {
-            SimpleInventory simpleInventory = this.getInventory();
-            boolean bl = simpleInventory.canInsert(itemStack);
-            if (!bl) {
-                return;
-            }
-
-            this.method_29499(item);
-            this.sendPickup(item, itemStack.getCount());
-            ItemStack itemStack2 = simpleInventory.addStack(itemStack);
-            if (itemStack2.isEmpty()) {
-                item.remove();
-            } else {
-                itemStack.setCount(itemStack2.getCount());
-            }
-        }
-
-    }
-
-    @Override
-    public boolean canGather(ItemStack stack) {
-        Item item = stack.getItem();
-        return (VillagerHelper.GATHERABLE_ITEMS.contains(item) || this.getVillagerData().getProfession().getGatherableItems().contains(item)) && this.getInventory().canInsert(stack);
-    }
-
-    public boolean wantsToStartBreeding() {
-        return this.getAvailableFood() >= 24;
-    }
-
-    public boolean canBreed() {
-        return this.getAvailableFood() < 12;
-    }
-
-    private int getAvailableFood() {
-        SimpleInventory simpleInventory = this.getInventory();
-        return VillagerHelper.ITEM_FOOD_VALUES.entrySet().stream().mapToInt((entry) -> simpleInventory.count(entry.getKey()) * entry.getValue()).sum();
-    }
-
-    public boolean hasSeedToPlant() {
-        return this.getInventory().containsAny(ImmutableSet.of(Items.WHEAT_SEEDS, Items.POTATO, Items.CARROT, Items.BEETROOT_SEEDS));
-    }
-
-    @Override
-    protected void fillRecipes() {
-        MCAVillagerData villagerData = this.getVillagerData();
-        Int2ObjectMap<TradeOffers.Factory[]> int2ObjectMap = TradeOffers.PROFESSION_TO_LEVELED_TRADE.get(villagerData.getProfession());
-        if (int2ObjectMap != null && !int2ObjectMap.isEmpty()) {
-            TradeOffers.Factory[] factorys = int2ObjectMap.get(villagerData.getLevel());
-            if (factorys != null) {
-                TraderOfferList traderOfferList = this.getOffers();
-                this.fillRecipesFromPool(traderOfferList, factorys, 2);
-            }
-        }
-    }
-
-    public void talkWithVillager(ServerWorld serverWorld, MCAVillagerEntity villagerEntity, long l) {
-        if ((l < this.gossipStartTime || l >= this.gossipStartTime + 1200L) && (l < villagerEntity.gossipStartTime || l >= villagerEntity.gossipStartTime + 1200L)) {
-            this.gossip.shareGossipFrom(villagerEntity.gossip, this.random, 10);
-            this.gossipStartTime = l;
-            villagerEntity.gossipStartTime = l;
-            this.summonGolem(serverWorld, l, 5);
-        }
-    }
-
-    private void decayGossip() {
-        long l = this.world.getTime();
-        if (this.lastGossipDecayTime == 0L) {
-            this.lastGossipDecayTime = l;
-        } else if (l >= this.lastGossipDecayTime + 24000L) {
-            this.gossip.decay();
-            this.lastGossipDecayTime = l;
-        }
-    }
-
-    //TODO replace with Guard
-    public void summonGolem(ServerWorld serverWorld, long l, int i) {
-        if (this.canSummonGolem(l)) {
-            Box box = this.getBoundingBox().expand(10.0D, 10.0D, 10.0D);
-            List<VillagerEntity> list = serverWorld.getNonSpectatingEntities(VillagerEntity.class, box);
-            List<VillagerEntity> list2 = list.stream().filter((villagerEntity) -> villagerEntity.canSummonGolem(l)).limit(5L).collect(Collectors.toList());
-            if (list2.size() >= i) {
-                IronGolemEntity ironGolemEntity = this.spawnIronGolem(serverWorld);
-                if (ironGolemEntity != null) {
-                    list.forEach(GolemLastSeenSensor::method_30233);
-                }
-            }
-        }
-    }
-
-    public boolean canSummonGolem(long time) {
-        if (!this.hasRecentlyWorkedAndSlept(this.world.getTime())) {
-            return false;
-        } else {
-            return !this.brain.hasMemoryModule(MemoryModuleType.GOLEM_DETECTED_RECENTLY);
-        }
-    }
-
-    private IronGolemEntity spawnIronGolem(ServerWorld serverWorld) {
-        BlockPos blockPos = this.getBlockPos();
-
-        for (int i = 0; i < 10; ++i) {
-            double d = serverWorld.random.nextInt(16) - 8;
-            double e = serverWorld.random.nextInt(16) - 8;
-            BlockPos blockPos2 = this.method_30023(blockPos, d, e);
-            if (blockPos2 != null) {
-                IronGolemEntity ironGolemEntity = EntityType.IRON_GOLEM.create(serverWorld, null, null, null, blockPos2, SpawnReason.MOB_SUMMONED, false, false);
-                if (ironGolemEntity != null) {
-                    if (ironGolemEntity.canSpawn(serverWorld, SpawnReason.MOB_SUMMONED) && ironGolemEntity.canSpawn(serverWorld)) {
-                        serverWorld.spawnEntityAndPassengers(ironGolemEntity);
-                        return ironGolemEntity;
-                    }
-
-                    ironGolemEntity.remove();
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private BlockPos method_30023(BlockPos blockPos, double d, double e) {
-        BlockPos blockPos2 = blockPos.add(d, 6.0D, e);
-        BlockState blockState = this.world.getBlockState(blockPos2);
-
-        for (int j = 6; j >= -6; --j) {
-            BlockPos blockPos3 = blockPos2;
-            BlockState blockState2 = blockState;
-            blockPos2 = blockPos2.down();
-            blockState = this.world.getBlockState(blockPos2);
-            if ((blockState2.isAir() || blockState2.getMaterial().isLiquid()) && blockState.getMaterial().blocksLight()) {
-                return blockPos3;
-            }
-        }
-
-        return null;
-    }
-
-    //TODO make it hurt your points with that person
-    @Override
-    public void onInteractionWith(EntityInteraction interaction, Entity entity) {
-        if (interaction == EntityInteraction.ZOMBIE_VILLAGER_CURED) {
-            this.gossip.startGossip(entity.getUuid(), VillageGossipType.MAJOR_POSITIVE, 20);
-            this.gossip.startGossip(entity.getUuid(), VillageGossipType.MINOR_POSITIVE, 25);
-        } else if (interaction == EntityInteraction.TRADE) {
-            this.gossip.startGossip(entity.getUuid(), VillageGossipType.TRADING, 2);
-        } else if (interaction == EntityInteraction.VILLAGER_HURT) {
-            this.gossip.startGossip(entity.getUuid(), VillageGossipType.MINOR_NEGATIVE, 25);
-        } else if (interaction == EntityInteraction.VILLAGER_KILLED) {
-            this.gossip.startGossip(entity.getUuid(), VillageGossipType.MAJOR_NEGATIVE, 25);
-        }
-
-    }
-
-    @Override
-    public int getExperience() {
-        return this.experience;
-    }
-
-    public void setExperience(int amount) {
-        this.experience = amount;
-    }
-
-    private void clearDailyRestockCount() {
-        this.resetAndUpdatePrices();
-        this.restocksToday = 0;
-    }
-
-    public MCAVillagerGossips getGossip() {
-        return this.gossip;
-    }
-
-    public void setGossipDataFromTag(Tag tag) {
-        this.gossip.deserialize(new Dynamic<>(NbtOps.INSTANCE, tag));
-    }
-
-    @Override
-    protected void sendAiDebugData() {
-        super.sendAiDebugData();
-        DebugInfoSender.sendBrainDebugData(this);
-    }
-
-    @Override
-    public void sleep(BlockPos pos) {
-        super.sleep(pos);
-        this.brain.remember(MemoryModuleType.LAST_SLEPT, this.world.getTime());
-        this.brain.forget(MemoryModuleType.WALK_TARGET);
-        this.brain.forget(MemoryModuleType.CANT_REACH_WALK_TARGET_SINCE);
-    }
-
-    @Override
-    public void wakeUp() {
-        super.wakeUp();
-        this.brain.remember(MemoryModuleType.LAST_WOKEN, this.world.getTime());
-    }
-
-    private boolean hasRecentlyWorkedAndSlept(long worldTime) {
-        Optional<Long> optional = this.brain.getOptionalMemory(MemoryModuleType.LAST_SLEPT);
-        return optional.filter(aLong -> worldTime - aLong < 24000L).isPresent();
-    }
-
-    @Override
-    public Text getName() {
-        return new LiteralText(villagerName);
-    }
+public class MCAVillagerEntity extends MerchantEntity implements InteractionObserver {
+	private final MCAVillagerGossips gossip;
+	private int levelUpTimer;
+	private boolean levelingUp;
+	private PlayerEntity lastCustomer;
+	private byte foodLevel;
+	private long gossipStartTime;
+	private long lastGossipDecayTime;
+	private int experience;
+	private long lastRestockTime;
+	private int restocksToday;
+	private long lastRestockCheckTime;
+	private boolean natural;
+	private String villagerName;
+	private String texture;
+	private Gender gender;
+	private Mentality mentality;
+	private Personality personality;
+	//TODO lots of cached variables so i don't have to dig through VillagerData
+	
+	public MCAVillagerEntity(EntityType<? extends MCAVillagerEntity> entityType, World world) {
+		super(entityType, world);
+		this.gossip = new MCAVillagerGossips();
+		((MobNavigation) this.getNavigation()).setCanPathThroughDoors(true);
+		this.getNavigation().setCanSwim(true);
+		this.setCanPickUpLoot(true);
+	}
+	
+	public static DefaultAttributeContainer.Builder createVillagerAttributes() {
+		return MobEntity.createMobAttributes().add(EntityAttributes.GENERIC_MOVEMENT_SPEED, 0.5D)
+				.add(EntityAttributes.GENERIC_FOLLOW_RANGE, 48.0D);
+	}
+	
+	@Override
+	@SuppressWarnings("unchecked")
+	public Brain<MCAVillagerEntity> getBrain() {
+		return (Brain<MCAVillagerEntity>) this.brain;
+	}
+	
+	@Override
+	protected Brain.Profile<MCAVillagerEntity> createBrainProfile() {
+		return Brain.createProfile(VillagerHelper.MEMORY_MODULES, VillagerHelper.SENSORS);
+	}
+	
+	@Override
+	protected Brain<?> deserializeBrain(Dynamic<?> dynamic) {
+		Brain<MCAVillagerEntity> brain = this.createBrainProfile().deserialize(dynamic);
+		this.initBrain(brain);
+		return brain;
+	}
+	
+	public void reinitializeBrain(ServerWorld world) {
+		Brain<MCAVillagerEntity> brain = this.getBrain();
+		brain.stopAllTasks(world, this);
+		this.brain = brain.copy();
+		this.initBrain(this.getBrain());
+	}
+	
+	//TODO add
+	private void initBrain(Brain<MCAVillagerEntity> brain) {
+		VillagerProfession villagerProfession = this.getVillagerData().getProfession();
+		if (this.isBaby()) {
+			brain.setSchedule(Schedule.VILLAGER_BABY);
+			brain.setTaskList(Activity.PLAY, MCAVillagerTaskListProvider.createPlayTasks(0.5F));
+		} else {
+			brain.setSchedule(Schedule.VILLAGER_DEFAULT);
+			brain.setTaskList(Activity.WORK, MCAVillagerTaskListProvider.createWorkTasks(villagerProfession, 0.5F), ImmutableSet.of(Pair.of(MemoryModuleType.JOB_SITE, MemoryModuleState.VALUE_PRESENT)));
+		}
+		
+		brain.setTaskList(Activity.CORE, MCAVillagerTaskListProvider.createCoreTasks(villagerProfession, 0.5F));
+		brain.setTaskList(Activity.MEET, MCAVillagerTaskListProvider.createMeetTasks(villagerProfession, 0.5F), ImmutableSet.of(Pair.of(MemoryModuleType.MEETING_POINT, MemoryModuleState.VALUE_PRESENT)));
+		brain.setTaskList(Activity.REST, MCAVillagerTaskListProvider.createRestTasks(villagerProfession, 0.5F));
+		brain.setTaskList(Activity.IDLE, MCAVillagerTaskListProvider.createIdleTasks(villagerProfession, 0.5F));
+		brain.setTaskList(Activity.PANIC, MCAVillagerTaskListProvider.createPanicTasks(villagerProfession, 0.5F));
+		brain.setTaskList(Activity.PRE_RAID, MCAVillagerTaskListProvider.createPreRaidTasks(villagerProfession, 0.5F));
+		brain.setTaskList(Activity.RAID, MCAVillagerTaskListProvider.createRaidTasks(villagerProfession, 0.5F));
+		brain.setTaskList(Activity.HIDE, MCAVillagerTaskListProvider.createHideTasks(villagerProfession, 0.5F));
+		brain.setCoreActivities(ImmutableSet.of(Activity.CORE));
+		brain.setDefaultActivity(Activity.IDLE);
+		brain.doExclusively(Activity.IDLE);
+		brain.refreshActivities(this.world.getTimeOfDay(), this.world.getTime());
+	}
+	
+	@Override
+	protected void onGrowUp() {
+		super.onGrowUp();
+		if (this.world instanceof ServerWorld) {
+			this.reinitializeBrain((ServerWorld) this.world);
+		}
+		
+	}
+	
+	public boolean isNatural() {
+		return this.natural;
+	}
+	
+	@Override
+	protected void mobTick() {
+		this.world.getProfiler().push("mcaVillagerBrain");
+		this.getBrain().tick((ServerWorld) this.world, this);
+		this.world.getProfiler().pop();
+		if (this.natural) {
+			this.natural = false;
+		}
+		
+		if (!this.hasCustomer() && this.levelUpTimer > 0) {
+			--this.levelUpTimer;
+			if (this.levelUpTimer <= 0) {
+				if (this.levelingUp) {
+					this.levelUp();
+					this.levelingUp = false;
+				}
+				
+				this.addStatusEffect(new StatusEffectInstance(StatusEffects.REGENERATION, 200, 0));
+			}
+		}
+		
+		if (this.lastCustomer != null && this.world instanceof ServerWorld) {
+			((ServerWorld) this.world).handleInteraction(EntityInteraction.TRADE, this.lastCustomer, this);
+			this.world.sendEntityStatus(this, (byte) 14);
+			this.lastCustomer = null;
+		}
+		
+		if (!this.isAiDisabled() && this.random.nextInt(100) == 0) {
+			Raid raid = ((ServerWorld) this.world).getRaidAt(this.getBlockPos());
+			if (raid != null && raid.isActive() && !raid.isFinished()) {
+				this.world.sendEntityStatus(this, (byte) 42);
+			}
+		}
+		
+		if (this.getVillagerData().getProfession() == VillagerProfession.NONE && this.hasCustomer()) {
+			this.resetCustomer();
+		}
+		
+		super.mobTick();
+	}
+	
+	@Override
+	public void tick() {
+		super.tick();
+		if (this.getHeadRollingTimeLeft() > 0) {
+			this.setHeadRollingTimeLeft(this.getHeadRollingTimeLeft() - 1);
+		}
+		
+		this.decayGossip();
+	}
+	
+	//TODO open
+	@Override
+	public ActionResult interactMob(PlayerEntity player, Hand hand) {
+		ItemStack itemStack = player.getStackInHand(hand);
+		if (itemStack.getItem() != Items.VILLAGER_SPAWN_EGG && this.isAlive() && !this.hasCustomer() && !this.isSleeping()) {
+			if (this.isBaby()) {
+				this.sayNo();
+			} else {
+				boolean bl = this.getOffers().isEmpty();
+				if (hand == Hand.MAIN_HAND) {
+					if (bl && !this.world.isClient) {
+						this.sayNo();
+					}
+					
+					player.incrementStat(Stats.TALKED_TO_VILLAGER);
+				}
+				
+				if (!bl) {
+					if (!this.world.isClient) {
+						assert this.offers != null;
+						if (!this.offers.isEmpty()) {
+							this.beginTradeWith(player);
+						}
+					}
+					
+				}
+			}
+			return ActionResult.success(this.world.isClient);
+		} else {
+			return super.interactMob(player, hand);
+		}
+	}
+	
+	//TODO Cleanup Trader stuff
+	private void sayNo() {
+		this.setHeadRollingTimeLeft(40);
+	}
+	
+	private void beginTradeWith(PlayerEntity customer) {
+		this.prepareRecipesFor(customer);
+		this.setCurrentCustomer(customer);
+		this.sendOffers(customer, this.getDisplayName(), this.getVillagerData().getLevel());
+	}
+	
+	@Override
+	public void setCurrentCustomer(PlayerEntity customer) {
+		boolean bl = this.getCurrentCustomer() != null && customer == null;
+		super.setCurrentCustomer(customer);
+		if (bl) {
+			this.resetCustomer();
+		}
+		
+	}
+	
+	@Override
+	protected void resetCustomer() {
+		super.resetCustomer();
+		this.clearCurrentBonus();
+	}
+	
+	private void clearCurrentBonus() {
+		
+		for (TradeOffer tradeOffer : this.getOffers()) {
+			tradeOffer.clearSpecialPrice();
+		}
+		
+	}
+	
+	@Override
+	public boolean canRefreshTrades() {
+		return true;
+	}
+	
+	public void restock() {
+		this.updatePricesOnDemand();
+		
+		for (TradeOffer tradeOffer : this.getOffers()) {
+			tradeOffer.resetUses();
+		}
+		
+		this.lastRestockTime = this.world.getTime();
+		++this.restocksToday;
+	}
+	
+	private boolean needRestock() {
+		for (TradeOffer offer : this.getOffers()) {
+			if (offer.method_21834()) {
+				return true;
+			}
+		}
+		
+		return false;
+	}
+	
+	private boolean canRestock() {
+		return this.restocksToday == 0 || this.restocksToday < 2 && this.world.getTime() > this.lastRestockTime + 2400L;
+	}
+	
+	public boolean shouldRestock() {
+		long l = this.lastRestockTime + 12000L;
+		long m = this.world.getTime();
+		boolean bl = m > l;
+		long n = this.world.getTimeOfDay();
+		if (this.lastRestockCheckTime > 0L) {
+			long o = this.lastRestockCheckTime / 24000L;
+			long p = n / 24000L;
+			bl |= p > o;
+		}
+		
+		this.lastRestockCheckTime = n;
+		if (bl) {
+			this.lastRestockTime = m;
+			this.clearDailyRestockCount();
+		}
+		
+		return this.canRestock() && this.needRestock();
+	}
+	
+	private void resetAndUpdatePrices() {
+		int i = 2 - this.restocksToday;
+		if (i > 0) {
+			
+			for (TradeOffer tradeOffer : this.getOffers()) {
+				tradeOffer.resetUses();
+			}
+		}
+		
+		for (int j = 0; j < i; ++j) {
+			this.updatePricesOnDemand();
+		}
+		
+	}
+	
+	private void updatePricesOnDemand() {
+		
+		for (TradeOffer tradeOffer : this.getOffers()) {
+			tradeOffer.updatePriceOnDemand();
+		}
+		
+	}
+	
+	private void prepareRecipesFor(PlayerEntity player) {
+		int i = this.getReputation(player);
+		if (i != 0) {
+			
+			for (TradeOffer tradeOffer : this.getOffers()) {
+				tradeOffer.increaseSpecialPrice(-MathHelper.floor((float) i * tradeOffer.getPriceMultiplier()));
+			}
+		}
+		
+		if (player.hasStatusEffect(StatusEffects.HERO_OF_THE_VILLAGE)) {
+			StatusEffectInstance statusEffectInstance = player.getStatusEffect(StatusEffects.HERO_OF_THE_VILLAGE);
+			assert statusEffectInstance != null;
+			int j = statusEffectInstance.getAmplifier();
+			
+			for (TradeOffer tradeOffer2 : this.getOffers()) {
+				double d = 0.3D + 0.0625D * (double) j;
+				int k = (int) Math.floor(d * (double) tradeOffer2.getOriginalFirstBuyItem().getCount());
+				tradeOffer2.increaseSpecialPrice(-Math.max(k, 1));
+			}
+		}
+		
+	}
+	
+	//TODO Keep or move to VillagerData?
+	@Override
+	public void writeCustomDataToTag(CompoundTag tag) {
+		super.writeCustomDataToTag(tag);
+		tag.putByte("FoodLevel", this.foodLevel);
+		tag.put("Gossips", this.gossip.serialize(NbtOps.INSTANCE).getValue());
+		tag.putInt("Xp", this.experience);
+		tag.putLong("LastRestock", this.lastRestockTime);
+		tag.putLong("LastGossipDecay", this.lastGossipDecayTime);
+		tag.putInt("RestocksToday", this.restocksToday);
+		if (this.natural) {
+			tag.putBoolean("AssignProfessionWhenSpawned", true);
+		}
+		
+	}
+	
+	@Override
+	public void readCustomDataFromTag(CompoundTag tag) {
+		super.readCustomDataFromTag(tag);
+		
+		if (tag.contains("Offers", 10)) {
+			this.offers = new TradeOfferList(tag.getCompound("Offers"));
+		}
+		
+		if (tag.contains("FoodLevel", 1)) {
+			this.foodLevel = tag.getByte("FoodLevel");
+		}
+		
+		ListTag listTag = tag.getList("Gossips", 10);
+		this.gossip.deserialize(new Dynamic<>(NbtOps.INSTANCE, listTag));
+		if (tag.contains("Xp", 3)) {
+			this.experience = tag.getInt("Xp");
+		}
+		
+		this.lastRestockTime = tag.getLong("LastRestock");
+		this.lastGossipDecayTime = tag.getLong("LastGossipDecay");
+		this.setCanPickUpLoot(true);
+		if (this.world instanceof ServerWorld) {
+			this.reinitializeBrain((ServerWorld) this.world);
+		}
+		
+		this.restocksToday = tag.getInt("RestocksToday");
+		if (tag.contains("AssignProfessionWhenSpawned")) {
+			this.natural = tag.getBoolean("AssignProfessionWhenSpawned");
+		}
+		this.cacheVillagerData();
+		
+	}
+	
+	public void cacheVillagerData() {
+		MCAVillagerData data = this.getVillagerData();
+		this.villagerName = data.getName();
+		this.texture = data.getTexture();
+		this.gender = data.getGender();
+		this.mentality = data.getMentality();
+		this.personality = data.getPersonality();
+	}
+	
+	@Override
+	public boolean canImmediatelyDespawn(double distanceSquared) {
+		return false;
+	}
+	
+	public MCAVillagerData getVillagerData() {
+		return MCAComponents.VILLAGE_DATE_COMPONENT.get(this).get();
+	}
+	
+	//CLEANUP copied villager methods
+	@Override
+	protected void afterUsing(TradeOffer offer) {
+		int i = 3 + this.random.nextInt(4);
+		this.experience += offer.getTraderExperience();
+		this.lastCustomer = this.getCurrentCustomer();
+		if (this.canLevelUp()) {
+			this.levelUpTimer = 40;
+			this.levelingUp = true;
+			i += 5;
+		}
+		
+		if (offer.shouldRewardPlayerExperience()) {
+			this.world.spawnEntity(new ExperienceOrbEntity(this.world, this.getX(), this.getY() + 0.5D, this.getZ(), i));
+		}
+		
+	}
+	
+	@Override
+	public void setAttacker(LivingEntity attacker) {
+		if (attacker != null && this.world instanceof ServerWorld) {
+			((ServerWorld) this.world).handleInteraction(EntityInteraction.VILLAGER_HURT, attacker, this);
+			if (this.isAlive() && attacker instanceof PlayerEntity) {
+				this.world.sendEntityStatus(this, (byte) 13);
+			}
+		}
+		
+		super.setAttacker(attacker);
+	}
+	
+	@Override
+	public void onDeath(DamageSource source) {
+		LOGGER.info("Villager {} died, message: '{}'", this, source.getDeathMessage(this).getString());
+		Entity entity = source.getAttacker();
+		if (entity != null) {
+			this.notifyDeath(entity);
+		}
+		
+		this.releaseTicketFor(MemoryModuleType.HOME);
+		this.releaseTicketFor(MemoryModuleType.JOB_SITE);
+		this.releaseTicketFor(MemoryModuleType.MEETING_POINT);
+		super.onDeath(source);
+	}
+	
+	private void notifyDeath(Entity killer) {
+		if (this.world instanceof ServerWorld) {
+			Optional<List<LivingEntity>> optional = this.brain.getOptionalMemory(MemoryModuleType.VISIBLE_MOBS);
+			if (optional.isPresent()) {
+				ServerWorld serverWorld = (ServerWorld) this.world;
+				optional.get().stream().filter((livingEntity) -> livingEntity instanceof InteractionObserver).forEach((livingEntity) -> serverWorld.handleInteraction(EntityInteraction.VILLAGER_KILLED, killer, (InteractionObserver) livingEntity));
+			}
+		}
+	}
+	
+	public void releaseTicketFor(MemoryModuleType<GlobalPos> memoryModuleType) {
+		if (this.world instanceof ServerWorld) {
+			MinecraftServer minecraftServer = ((ServerWorld) this.world).getServer();
+			this.brain.getOptionalMemory(memoryModuleType).ifPresent((globalPos) -> {
+				ServerWorld serverWorld = minecraftServer.getWorld(globalPos.getDimension());
+				if (serverWorld != null) {
+					PointOfInterestStorage pointOfInterestStorage = serverWorld.getPointOfInterestStorage();
+					Optional<PointOfInterestType> optional = pointOfInterestStorage.getType(globalPos.getPos());
+					BiPredicate<MCAVillagerEntity, PointOfInterestType> biPredicate = VillagerHelper.POINTS_OF_INTEREST.get(memoryModuleType);
+					if (optional.isPresent() && biPredicate.test(this, optional.get())) {
+						pointOfInterestStorage.releaseTicket(globalPos.getPos());
+						DebugInfoSender.sendPointOfInterest(serverWorld, globalPos.getPos());
+					}
+					
+				}
+			});
+		}
+	}
+	
+	//TODO more breeding shit that needs to be removed
+	@Override
+	public boolean isReadyToBreed() {
+		return this.foodLevel + this.getAvailableFood() >= 12 && this.getBreedingAge() == 0;
+	}
+	
+	private boolean lacksFood() {
+		return this.foodLevel < 12;
+	}
+	
+	private void consumeAvailableFood() {
+		if (this.lacksFood() && this.getAvailableFood() != 0) {
+			int size = this.getInventory().size();
+			for (int i = 0; i < size; ++i) {
+				ItemStack itemStack = this.getInventory().getStack(i);
+				if (!itemStack.isEmpty()) {
+					Integer integer = VillagerHelper.ITEM_FOOD_VALUES.get(itemStack.getItem());
+					if (integer != null) {
+						int j = itemStack.getCount();
+						
+						for (int k = j; k > 0; --k) {
+							this.foodLevel = (byte) (this.foodLevel + integer);
+							this.getInventory().removeStack(i, 1);
+							if (!this.lacksFood()) {
+								return;
+							}
+						}
+					}
+				}
+			}
+			
+		}
+	}
+	
+	public int getReputation(PlayerEntity player) {
+		return this.gossip.getReputationFor(player.getUuid(), (villageGossipType) -> true);
+	}
+	
+	private void depleteFood(int amount) {
+		this.foodLevel = (byte) (this.foodLevel - amount);
+	}
+	
+	public void eatForBreeding() {
+		this.consumeAvailableFood();
+		this.depleteFood(12);
+	}
+	
+	public void setOffers(TradeOfferList offers) {
+		this.offers = offers;
+	}
+	
+	private boolean canLevelUp() {
+		int i = this.getVillagerData().getLevel();
+		return VillagerData.canLevelUp(i) && this.experience >= VillagerData.getUpperLevelExperience(i);
+	}
+	
+	private void levelUp() {
+		this.getVillagerData().setLevel(getVillagerData().getLevel() + 1);
+		this.fillRecipes();
+	}
+	
+	protected Text getDefaultName() {
+		return new TranslatableText(this.getType().getTranslationKey() + '.' + Registry.VILLAGER_PROFESSION.getId(this.getVillagerData().getProfession()).getPath());
+	}
+	
+	@Override
+	@Environment(EnvType.CLIENT)
+	public void handleStatus(byte status) {
+		if (status == 12) {
+			this.produceParticles(ParticleTypes.HEART);
+		} else if (status == 13) {
+			this.produceParticles(ParticleTypes.ANGRY_VILLAGER);
+		} else if (status == 14) {
+			this.produceParticles(ParticleTypes.HAPPY_VILLAGER);
+		} else if (status == 42) {
+			this.produceParticles(ParticleTypes.SPLASH);
+		} else {
+			super.handleStatus(status);
+		}
+		
+	}
+	
+	@Override
+	public EntityData initialize(ServerWorldAccess arg, LocalDifficulty difficulty, SpawnReason spawnReason, EntityData entityData, CompoundTag entityTag) {
+		if (spawnReason == SpawnReason.BREEDING) {
+			this.getVillagerData().setProfession(VillagerProfession.NONE);
+		}
+		
+		if (spawnReason == SpawnReason.STRUCTURE) {
+			this.natural = true;
+		}
+		
+		return super.initialize(arg, difficulty, spawnReason, entityData, entityTag);
+	}
+	
+	@Override
+	public MCAVillagerEntity createChild(ServerWorld serverWorld, PassiveEntity passiveEntity) {
+		MCAVillagerEntity villagerEntity = new MCAVillagerEntity(MCAEntities.MCA_VILLAGER, serverWorld);
+		villagerEntity.initialize(serverWorld, serverWorld.getLocalDifficulty(villagerEntity.getBlockPos()), SpawnReason.BREEDING, null, null);
+		return villagerEntity;
+	}
+	
+	@Override
+	public void onStruckByLightning(ServerWorld serverWorld, LightningEntity lightningEntity) {
+		if (serverWorld.getDifficulty() != Difficulty.PEACEFUL) {
+			LOGGER.info("Villager {} was struck by lightning {}.", this, lightningEntity);
+			WitchEntity witchEntity = EntityType.WITCH.create(serverWorld);
+			assert witchEntity != null;
+			witchEntity.refreshPositionAndAngles(this.getX(), this.getY(), this.getZ(), this.yaw, this.pitch);
+			witchEntity.initialize(serverWorld, serverWorld.getLocalDifficulty(witchEntity.getBlockPos()), SpawnReason.CONVERSION, null, null);
+			witchEntity.setAiDisabled(this.isAiDisabled());
+			if (this.hasCustomName()) {
+				witchEntity.setCustomName(this.getCustomName());
+				witchEntity.setCustomNameVisible(this.isCustomNameVisible());
+			}
+			
+			witchEntity.setPersistent();
+			serverWorld.spawnEntityAndPassengers(witchEntity);
+			this.remove();
+		} else {
+			super.onStruckByLightning(serverWorld, lightningEntity);
+		}
+		
+	}
+	
+	@Override
+	protected void loot(ItemEntity item) {
+		ItemStack itemStack = item.getStack();
+		if (this.canGather(itemStack)) {
+			SimpleInventory simpleInventory = this.getInventory();
+			boolean bl = simpleInventory.canInsert(itemStack);
+			if (!bl) {
+				return;
+			}
+			
+			this.method_29499(item);
+			this.sendPickup(item, itemStack.getCount());
+			ItemStack itemStack2 = simpleInventory.addStack(itemStack);
+			if (itemStack2.isEmpty()) {
+				item.remove();
+			} else {
+				itemStack.setCount(itemStack2.getCount());
+			}
+		}
+		
+	}
+	
+	@Override
+	public boolean canGather(ItemStack stack) {
+		Item item = stack.getItem();
+		return (VillagerHelper.GATHERABLE_ITEMS.contains(item) || this.getVillagerData().getProfession().getGatherableItems().contains(item)) && this.getInventory().canInsert(stack);
+	}
+	
+	public boolean wantsToStartBreeding() {
+		return this.getAvailableFood() >= 24;
+	}
+	
+	public boolean canBreed() {
+		return this.getAvailableFood() < 12;
+	}
+	
+	private int getAvailableFood() {
+		SimpleInventory simpleInventory = this.getInventory();
+		return VillagerHelper.ITEM_FOOD_VALUES.entrySet().stream().mapToInt((entry) -> simpleInventory.count(entry.getKey()) * entry.getValue()).sum();
+	}
+	
+	public boolean hasSeedToPlant() {
+		return this.getInventory().containsAny(ImmutableSet.of(Items.WHEAT_SEEDS, Items.POTATO, Items.CARROT, Items.BEETROOT_SEEDS));
+	}
+	
+	@Override
+	protected void fillRecipes() {
+		MCAVillagerData villagerData = this.getVillagerData();
+		Int2ObjectMap<TradeOffers.Factory[]> int2ObjectMap = TradeOffers.PROFESSION_TO_LEVELED_TRADE.get(villagerData.getProfession());
+		if (int2ObjectMap != null && !int2ObjectMap.isEmpty()) {
+			TradeOffers.Factory[] factories = int2ObjectMap.get(villagerData.getLevel());
+			if (factories != null) {
+				TradeOfferList tradeOfferList = this.getOffers();
+				this.fillRecipesFromPool(tradeOfferList, factories, 2);
+			}
+		}
+	}
+	
+	public void talkWithVillager(ServerWorld serverWorld, MCAVillagerEntity villagerEntity, long l) {
+		if ((l < this.gossipStartTime || l >= this.gossipStartTime + 1200L) && (l < villagerEntity.gossipStartTime || l >= villagerEntity.gossipStartTime + 1200L)) {
+			this.gossip.shareGossipFrom(villagerEntity.gossip, this.random, 10);
+			this.gossipStartTime = l;
+			villagerEntity.gossipStartTime = l;
+			this.summonGolem(serverWorld, l, 5);
+		}
+	}
+	
+	private void decayGossip() {
+		long l = this.world.getTime();
+		if (this.lastGossipDecayTime == 0L) {
+			this.lastGossipDecayTime = l;
+		} else if (l >= this.lastGossipDecayTime + 24000L) {
+			this.gossip.decay();
+			this.lastGossipDecayTime = l;
+		}
+	}
+	
+	//TODO replace with Guard
+	public void summonGolem(ServerWorld serverWorld, long l, int i) {
+		if (this.canSummonGolem(l)) {
+			Box box = this.getBoundingBox().expand(10.0D, 10.0D, 10.0D);
+			List<VillagerEntity> list = serverWorld.getNonSpectatingEntities(VillagerEntity.class, box);
+			List<VillagerEntity> list2 = list.stream().filter((villagerEntity) -> villagerEntity.canSummonGolem(l)).limit(5L).collect(Collectors.toList());
+			if (list2.size() >= i) {
+				IronGolemEntity ironGolemEntity = this.spawnIronGolem(serverWorld);
+				if (ironGolemEntity != null) {
+					list.forEach(GolemLastSeenSensor::method_30233);
+				}
+			}
+		}
+	}
+	
+	public boolean canSummonGolem(long time) {
+		if (!this.hasRecentlyWorkedAndSlept(this.world.getTime())) {
+			return false;
+		} else {
+			return !this.brain.hasMemoryModule(MemoryModuleType.GOLEM_DETECTED_RECENTLY);
+		}
+	}
+	
+	private IronGolemEntity spawnIronGolem(ServerWorld serverWorld) {
+		BlockPos blockPos = this.getBlockPos();
+		
+		for (int i = 0; i < 10; ++i) {
+			double d = serverWorld.random.nextInt(16) - 8;
+			double e = serverWorld.random.nextInt(16) - 8;
+			BlockPos blockPos2 = this.method_30023(blockPos, d, e);
+			if (blockPos2 != null) {
+				IronGolemEntity ironGolemEntity = EntityType.IRON_GOLEM.create(serverWorld, null, null, null, blockPos2, SpawnReason.MOB_SUMMONED, false, false);
+				if (ironGolemEntity != null) {
+					if (ironGolemEntity.canSpawn(serverWorld, SpawnReason.MOB_SUMMONED) && ironGolemEntity.canSpawn(serverWorld)) {
+						serverWorld.spawnEntityAndPassengers(ironGolemEntity);
+						return ironGolemEntity;
+					}
+					
+					ironGolemEntity.remove();
+				}
+			}
+		}
+		
+		return null;
+	}
+	
+	private BlockPos method_30023(BlockPos blockPos, double d, double e) {
+		BlockPos blockPos2 = blockPos.add(d, 6.0D, e);
+		BlockState blockState = this.world.getBlockState(blockPos2);
+		
+		for (int j = 6; j >= -6; --j) {
+			BlockPos blockPos3 = blockPos2;
+			BlockState blockState2 = blockState;
+			blockPos2 = blockPos2.down();
+			blockState = this.world.getBlockState(blockPos2);
+			if ((blockState2.isAir() || blockState2.getMaterial().isLiquid()) && blockState.getMaterial().blocksLight()) {
+				return blockPos3;
+			}
+		}
+		
+		return null;
+	}
+	
+	//TODO make it hurt your points with that person
+	@Override
+	public void onInteractionWith(EntityInteraction interaction, Entity entity) {
+		if (interaction == EntityInteraction.ZOMBIE_VILLAGER_CURED) {
+			this.gossip.startGossip(entity.getUuid(), VillageGossipType.MAJOR_POSITIVE, 20);
+			this.gossip.startGossip(entity.getUuid(), VillageGossipType.MINOR_POSITIVE, 25);
+		} else if (interaction == EntityInteraction.TRADE) {
+			this.gossip.startGossip(entity.getUuid(), VillageGossipType.TRADING, 2);
+		} else if (interaction == EntityInteraction.VILLAGER_HURT) {
+			this.gossip.startGossip(entity.getUuid(), VillageGossipType.MINOR_NEGATIVE, 25);
+		} else if (interaction == EntityInteraction.VILLAGER_KILLED) {
+			this.gossip.startGossip(entity.getUuid(), VillageGossipType.MAJOR_NEGATIVE, 25);
+		}
+		
+	}
+	
+	@Override
+	public int getExperience() {
+		return this.experience;
+	}
+	
+	public void setExperience(int amount) {
+		this.experience = amount;
+	}
+	
+	private void clearDailyRestockCount() {
+		this.resetAndUpdatePrices();
+		this.restocksToday = 0;
+	}
+	
+	public MCAVillagerGossips getGossip() {
+		return this.gossip;
+	}
+	
+	public void setGossipDataFromTag(Tag tag) {
+		this.gossip.deserialize(new Dynamic<>(NbtOps.INSTANCE, tag));
+	}
+	
+	@Override
+	protected void sendAiDebugData() {
+		super.sendAiDebugData();
+		DebugInfoSender.sendBrainDebugData(this);
+	}
+	
+	@Override
+	public void sleep(BlockPos pos) {
+		super.sleep(pos);
+		this.brain.remember(MemoryModuleType.LAST_SLEPT, this.world.getTime());
+		this.brain.forget(MemoryModuleType.WALK_TARGET);
+		this.brain.forget(MemoryModuleType.CANT_REACH_WALK_TARGET_SINCE);
+	}
+	
+	@Override
+	public void wakeUp() {
+		super.wakeUp();
+		this.brain.remember(MemoryModuleType.LAST_WOKEN, this.world.getTime());
+	}
+	
+	private boolean hasRecentlyWorkedAndSlept(long worldTime) {
+		Optional<Long> optional = this.brain.getOptionalMemory(MemoryModuleType.LAST_SLEPT);
+		return optional.filter(aLong -> worldTime - aLong < 24000L).isPresent();
+	}
+	
+	@Override
+	public Text getName() {
+		return new LiteralText(villagerName);
+	}
+	
+	public String getTexture() {
+		return texture;
+	}
 }

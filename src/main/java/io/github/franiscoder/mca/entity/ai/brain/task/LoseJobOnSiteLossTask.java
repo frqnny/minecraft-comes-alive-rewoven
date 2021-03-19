@@ -10,17 +10,17 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.village.VillagerProfession;
 
 public class LoseJobOnSiteLossTask extends Task<MCAVillagerEntity> {
-    public LoseJobOnSiteLossTask() {
-        super(ImmutableMap.of(MemoryModuleType.JOB_SITE, MemoryModuleState.VALUE_ABSENT));
-    }
-
-    protected boolean shouldRun(ServerWorld serverWorld, MCAVillagerEntity villagerEntity) {
-        MCAVillagerData villagerData = villagerEntity.getVillagerData();
-        return villagerData.getProfession() != VillagerProfession.NONE && villagerData.getProfession() != VillagerProfession.NITWIT && villagerEntity.getExperience() == 0 && villagerData.getLevel() <= 1;
-    }
-
-    protected void run(ServerWorld serverWorld, MCAVillagerEntity villagerEntity, long l) {
-        villagerEntity.getVillagerData().setProfession(VillagerProfession.NONE);
-        villagerEntity.reinitializeBrain(serverWorld);
-    }
+	public LoseJobOnSiteLossTask() {
+		super(ImmutableMap.of(MemoryModuleType.JOB_SITE, MemoryModuleState.VALUE_ABSENT));
+	}
+	
+	protected boolean shouldRun(ServerWorld serverWorld, MCAVillagerEntity villagerEntity) {
+		MCAVillagerData villagerData = villagerEntity.getVillagerData();
+		return villagerData.getProfession() != VillagerProfession.NONE && villagerData.getProfession() != VillagerProfession.NITWIT && villagerEntity.getExperience() == 0 && villagerData.getLevel() <= 1;
+	}
+	
+	protected void run(ServerWorld serverWorld, MCAVillagerEntity villagerEntity, long l) {
+		villagerEntity.getVillagerData().setProfession(VillagerProfession.NONE);
+		villagerEntity.reinitializeBrain(serverWorld);
+	}
 }
